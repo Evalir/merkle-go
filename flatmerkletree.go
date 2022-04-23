@@ -41,6 +41,7 @@ func (b Block) Bytes() []byte {
 	return b
 }
 
+// NewMerkleTree builds a non-finalized Merkle Tree with the blocks provided.
 func NewMerkleTree(blocks ...Block) *FlatMerkleTree {
 	return &FlatMerkleTree{
 		blocks:    blocks,
@@ -56,6 +57,7 @@ func (mt *FlatMerkleTree) String() (s string) {
 	return
 }
 
+// RootHash returns the root hash of the Merkle Tree.
 func (mt *FlatMerkleTree) RootHash() ([]byte, error) {
 	if !mt.finalized {
 		return nil, fmt.Errorf("invalid root hash: %v", ErrTreeNotFinalized)
@@ -64,6 +66,7 @@ func (mt *FlatMerkleTree) RootHash() ([]byte, error) {
 	return copyNode(mt.root).Bytes(), nil
 }
 
+// Insert lets you insert a new block on a non finalized Merkle Tree.
 func (mt *FlatMerkleTree) Insert(block Block) error {
 	if block == nil {
 		return ErrNilBlock
@@ -81,6 +84,12 @@ func (mt *FlatMerkleTree) Insert(block Block) error {
 	return nil
 }
 
+// Proof returns a cryptographic Merkle proof for the existence of a block.
+// If the merkle has not been finalized or the block is nil, an error is returned.
+// The following procedure is used for determining the proof:
+//
+// For any given node (starting at the block), add it's sibling to the proof
+// and then set the current node to their parent, until the root is reached.
 func (mt *FlatMerkleTree) Proof(block Block) ([]TreeNode, error) {
 	if block == nil {
 		return nil, ErrNilBlock
@@ -119,6 +128,8 @@ func (mt *FlatMerkleTree) Proof(block Block) ([]TreeNode, error) {
 	return proof, nil
 }
 
+// Verify performs a Merkle tree verification for a given block and proof.
+// If the proof can be reconstructed, then the proof is valid.
 func (mt *FlatMerkleTree) Verify(block Block, proof []TreeNode) error {
 	if !mt.finalized {
 		return ErrTreeNotFinalized
@@ -157,6 +168,16 @@ func (mt *FlatMerkleTree) Verify(block Block, proof []TreeNode) error {
 	return nil
 }
 
+// Finalize builds a SHA256 cryptographically hashed Merkle tree from a list of
+// data blocks. If no blocks exist in the tree, an error is returned. The
+// following invariants will be enforced:
+//
+// All leaf nodes and root node will be encoded with a 0x00 byte prefix and all
+// internal nodes will be encoded with a 0x01 byte prefix to prevent second
+// pre-image attacks.
+//
+// If there are an odd number of leaf nodes, the last data block will be
+// duplicated to create an even set.
 func (mt *FlatMerkleTree) Finalize() error {
 	if len(mt.blocks) == 0 {
 		return fmt.Errorf("Failed to finalize: %s", ErrEmptyMerkleTree)
