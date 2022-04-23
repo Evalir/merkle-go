@@ -3,6 +3,7 @@ package merklego
 import (
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"hash"
 )
 
@@ -20,13 +21,14 @@ type MerkleTree struct {
 }
 
 type Node struct {
-	Left   *Node
-	Right  *Node
-	Parent *Node
-	leaf   bool
-	dup    bool
 	Hash   []byte
 	Item   Storable
+	Left   *Node
+	Parent *Node
+	Right  *Node
+	Tree   *MerkleTree
+	dup    bool
+	leaf   bool
 }
 
 //MerkleRoot returns the unverified Merkle Root (hash of the root node) of the tree.
@@ -34,6 +36,30 @@ func (m *MerkleTree) MerkleRoot() []byte {
 	return m.merkleRoot
 }
 
+func (n *Node) VerifyNode() ([]byte, error) {
+	if n.leaf {
+		return n.Item.CalculateHash()
+	}
+
+	leftBytes, err := n.Left.VerifyNode()
+	if err != nil {
+		return nil, err
+	}
+
+	rightBytes, err := n.Right.VerifyNode()
+	if err != nil {
+		return nil, err
+	}
+
+	hf := n.Tree.hashFunc()
+	if _, err := hf.Write(append(leftBytes, rightBytes...)); err != nil {
+		return nil, err
+	}
+
+	return hf.Sum(nil), nil
+}
+
+// NewTree creates a new merkle tree with the Storable contents in content.
 func NewTree(content []Storable) (*MerkleTree, error) {
 	var defaultHashFunc = sha256.New
 
@@ -57,6 +83,9 @@ func NewTree(content []Storable) (*MerkleTree, error) {
 	return t, nil
 }
 
+// buildTree builds a new Merkle Tree with the contents from content.
+// It first builds the leaf nodes,
+// and then starts building the subsequent parents until it reaches the root.
 func buildTree(content []Storable, t *MerkleTree) (*Node, []*Node, error) {
 	var leaves []*Node
 
@@ -69,17 +98,19 @@ func buildTree(content []Storable, t *MerkleTree) (*Node, []*Node, error) {
 		leaves = append(leaves, &Node{
 			Hash: hash,
 			Item: c,
-			leaf: true,
+			Tree: t,
 			dup:  false,
+			leaf: true,
 		})
 	}
 
 	if len(leaves)%2 == 1 {
 		duplicate := &Node{
-			leaf: true,
-			dup:  true,
 			Hash: leaves[len(leaves)-1].Hash,
 			Item: leaves[len(leaves)-1].Item,
+			Tree: t,
+			dup:  true,
+			leaf: true,
 		}
 		leaves = append(leaves, duplicate)
 	}
@@ -92,6 +123,8 @@ func buildTree(content []Storable, t *MerkleTree) (*Node, []*Node, error) {
 	return root, leaves, nil
 }
 
+// buildIntermediate builds the intermediate part of the tree, above the leaves,
+// until it reaches the root.
 func buildIntermediate(leaves []*Node, t *MerkleTree) (*Node, error) {
 	var nodes []*Node
 	for i := 0; i < len(leaves); i += 2 {
@@ -110,9 +143,10 @@ func buildIntermediate(leaves []*Node, t *MerkleTree) (*Node, error) {
 		}
 
 		n := &Node{
+			Hash:  h.Sum(nil),
 			Left:  leaves[left],
 			Right: leaves[right],
-			Hash:  h.Sum(nil),
+			Tree:  t,
 		}
 
 		nodes = append(nodes, n)
@@ -126,4 +160,9 @@ func buildIntermediate(leaves []*Node, t *MerkleTree) (*Node, error) {
 	}
 
 	return buildIntermediate(nodes, t)
+}
+
+//String returns a string representation of the node.
+func (n *Node) String() string {
+	return fmt.Sprintf("%t %t %v %s", n.leaf, n.dup, n.Hash, n.Item)
 }
