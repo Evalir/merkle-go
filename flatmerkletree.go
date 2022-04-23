@@ -119,6 +119,44 @@ func (mt *FlatMerkleTree) Proof(block Block) ([]TreeNode, error) {
 	return proof, nil
 }
 
+func (mt *FlatMerkleTree) Verify(block Block, proof []TreeNode) error {
+	if !mt.finalized {
+		return ErrTreeNotFinalized
+	}
+
+	leafIdx, err := mt.findLeaf(block)
+	if err != nil {
+		return err
+	}
+
+	currNodeIdx := leafIdx
+	for i, proofChunk := range proof {
+		var reconstructedNode TreeNode
+
+		proofNodeBytes := copyNode(proofChunk)
+		currentNodeBytes := copyNode(mt.nodes[currNodeIdx])
+
+		// Append sibling to the left
+		if currNodeIdx%2 == 0 {
+			reconstructedNode = hashNode(append(proofNodeBytes, currentNodeBytes...), true)
+		} else {
+			reconstructedNode = hashNode(append(currentNodeBytes, proofNodeBytes...), true)
+		}
+
+		parentIdx := (currNodeIdx - 1) / 2
+		parentNode := mt.nodes[parentIdx]
+
+		if !bytes.Equal(parentNode.Bytes(), reconstructedNode.Bytes()) {
+			return fmt.Errorf("invalid proof at index %d for block %X; got: %X, want: %X",
+				i, block, reconstructedNode.Bytes(), parentNode.Bytes())
+		}
+
+		currNodeIdx = parentIdx
+	}
+
+	return nil
+}
+
 func (mt *FlatMerkleTree) Finalize() error {
 	if len(mt.blocks) == 0 {
 		return fmt.Errorf("Failed to finalize: %s", ErrEmptyMerkleTree)
